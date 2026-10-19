@@ -2,21 +2,18 @@ services:
   - type: web
     name: dayluxe-ai-ceo
     runtime: python
-    plan: starter            # persistent disks need a paid instance
+    # Free plan: no cost. Sleeps after ~15 min idle and has no persistent disk,
+    # so data resets on each deploy/restart. For permanent data switch to
+    # plan: starter and add a disk (see README).
+    plan: free
     buildCommand: "python -m compileall -q dayluxe"
     startCommand: "python -m dayluxe serve"
     healthCheckPath: /health
-    disk:
-      name: dayluxe-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.8"
       - key: DATABASE_PATH
-        value: /var/data/dayluxe.db
-      - key: PRICING_FILE
-        value: /var/data/pricing.json
+        value: data/dayluxe.db
       - key: ADMIN_TOKEN
         generateValue: true
       - key: WEBHOOK_SECRET
