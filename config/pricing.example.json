@@ -1,0 +1,26 @@
+{
+  "_note": "Copy to config/pricing.json and fill in YOUR approved prices. null = not set: quotes using it stay incomplete and cannot be sent.",
+  "currency": "AUD",
+  "gst_registered": null,
+  "validity_days": 30,
+  "payment_terms": "",
+  "warranty": "",
+  "items": {
+    "roof_restoration_tile": {"label": "Tile roof restoration (clean, rebed/repoint, seal, 2 coats)", "unit": "m2", "unit_price": null},
+    "roof_restoration_metal": {"label": "Metal roof restoration (clean, treat rust, prime, 2 coats)", "unit": "m2", "unit_price": null},
+    "roof_painting": {"label": "Roof painting", "unit": "m2", "unit_price": null},
+    "roof_cleaning": {"label": "Roof pressure cleaning", "unit": "m2", "unit_price": null},
+    "rebed_repoint": {"label": "Ridge capping rebed and repoint", "unit": "lm", "unit_price": null},
+    "tile_replacement": {"label": "Broken tile replacement", "unit": "each", "unit_price": null},
+    "gutter_cleaning": {"label": "Gutter cleaning", "unit": "lm", "unit_price": null},
+    "gutter_replacement": {"label": "Gutter replacement", "unit": "lm", "unit_price": null},
+    "gutter_guard": {"label": "Gutter guard supply and install", "unit": "lm", "unit_price": null},
+    "downpipe": {"label": "Downpipe replacement", "unit": "each", "unit_price": null},
+    "fascia_replacement": {"label": "Fascia replacement", "unit": "lm", "unit_price": null},
+    "fascia_painting": {"label": "Fascia painting", "unit": "lm", "unit_price": null},
+    "exterior_painting": {"label": "Exterior wall painting", "unit": "m2", "unit_price": null},
+    "interior_painting": {"label": "Interior wall/ceiling painting", "unit": "m2", "unit_price": null},
+    "fence_painting": {"label": "Fence painting", "unit": "lm", "unit_price": null},
+    "pergola_repair": {"label": "Pergola / carport repair (labour)", "unit": "hour", "unit_price": null}
+  }
+}

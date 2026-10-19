@@ -1,0 +1,63 @@
+services:
+  - type: web
+    name: dayluxe-ai-ceo
+    runtime: python
+    plan: starter            # persistent disks need a paid instance
+    buildCommand: "python -m compileall -q dayluxe"
+    startCommand: "python -m dayluxe serve"
+    healthCheckPath: /health
+    disk:
+      name: dayluxe-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: DATABASE_PATH
+        value: /var/data/dayluxe.db
+      - key: PRICING_FILE
+        value: /var/data/pricing.json
+      - key: ADMIN_TOKEN
+        generateValue: true
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: RUN_INTERVAL_MINUTES
+        value: "30"
+      - key: AUTO_SEND_EMAIL
+        value: "false"
+      - key: AUTO_PUBLISH_SOCIAL
+        value: "false"
+      - key: AUTO_SPEND_AD_BUDGET
+        value: "false"
+      - key: AUTO_SEND_QUOTES
+        value: "false"
+      - key: CEO_APPROVAL_REQUIRED
+        value: "true"
+      - key: BUSINESS_PHONE
+        sync: false
+      - key: EMAIL_SIGNATURE
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REFRESH_TOKEN
+        sync: false
+      - key: WP_BASE_URL
+        sync: false
+      - key: WP_USERNAME
+        sync: false
+      - key: WP_APP_PASSWORD
+        sync: false
+      - key: META_PAGE_ID
+        sync: false
+      - key: META_PAGE_ACCESS_TOKEN
+        sync: false
+      - key: META_IG_USER_ID
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
