@@ -68,8 +68,11 @@ python -m dayluxe serve           # لوحة التحكم على http://localhos
 ```
 AUTO_SEND_EMAIL=false  AUTO_PUBLISH_SOCIAL=false  AUTO_SPEND_AD_BUDGET=false
 AUTO_SEND_QUOTES=false CEO_APPROVAL_REQUIRED=true
+
+Social autopublishing is an independent explicit opt-in: setting `AUTO_PUBLISH_SOCIAL=true` allows scheduled social posts to publish without changing the approval policy for emails, quotes, ads, outreach, or website pages. Confirm Meta permissions and public image availability first; Instagram publishing requires a public image URL.
 ```
-- الشي يتنفذ تلقائياً **فقط** إذا مفتاح `AUTO_*` الخاص بيه `true` **و** `CEO_APPROVAL_REQUIRED=false`.
+- الإيميلات وعروض الأسعار تتنفذ تلقائياً **فقط** إذا مفتاح `AUTO_*` الخاص بيها `true` **و** `CEO_APPROVAL_REQUIRED=false`.
+- النشر الاجتماعي فقط يشتغل تلقائياً إذا `AUTO_PUBLISH_SOCIAL=true`، وهو خيار مستقل وصريح.
 - الإعلانات، الإيميلات التعريفية، نشر صفحات الموقع، والشكاوى: **دائماً** تحتاج موافقتك مهما كانت الإعدادات.
 - كل موافقة تتسجل: منو وافق، متى، وهل التنفيذ نجح فعلاً (النظام ما يقول "تم" إلا إذا الخدمة أكدت).
 - تكدر تعدل نص الإيميل أو المنشور باللوحة قبل ما توافق.
