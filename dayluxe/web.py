@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 MAX_BODY = 45_000_000
 COOKIE = "dlx_session"
-_MEDIA_RE = re.compile(r"^[a-f0-9]{24}\.png$")
+_MEDIA_RE = re.compile(r"^[a-f0-9]{24}\.(?:png|jpg|jpeg|webp|mp4|mov)$")
 _ROUTE_ID = re.compile(r"^/(?:api|ui)/approvals/(\d+)(?:/(approve|reject))?$")
 
 
