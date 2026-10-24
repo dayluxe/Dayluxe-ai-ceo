@@ -51,6 +51,19 @@ class Meta:
             raise HttpError("server", "Facebook did not confirm publication")
         return str(post_id)
 
+    def publish_facebook_video(self, message: str, video_url: str) -> str:
+        if not video_url:
+            raise HttpError("client", "Facebook video posts need a public video URL")
+        data = self.http.request(
+            "POST", f"{self.base}/{self.s.meta_page_id}/videos",
+            form={"file_url": video_url, "description": message},
+            bearer=self.s.meta_page_access_token, retry=False,
+        )
+        post_id = data.get("id")
+        if not post_id:
+            raise HttpError("server", "Facebook did not confirm video publication")
+        return str(post_id)
+
     def publish_instagram(self, caption: str, image_url: str) -> str:
         if not self.s.meta_ig_user_id:
             raise HttpError("client", "META_IG_USER_ID not set")
