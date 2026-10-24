@@ -421,6 +421,8 @@ def dashboard_page(app: App) -> str:
     last_txt = (f"Last run #{last['id']} ({esc(last['trigger'])}): <b class='s-{esc(last['status'])}'>"
                 f"{esc(last['status'])}</b> at {esc(last['finished_at'] or last['started_at'])}") if last else "No runs yet."
 
+    media_ui = "<div class='card' id='media-studio'><h2>Media studio — الصور والفيديو والصوت</h2>\n<p class='mute'>ارفع صور وفيديوهات شغل Dayluxe. الاختيار الحالي تقني حسب نوع الملف وحجمه وحداثته، وليس تحليلاً بصرياً كاملاً.</p>\n<label>اختيار صور أو فيديوهات<input id='media-files' type='file' accept='image/png,image/jpeg,image/webp,video/mp4,video/quicktime' multiple></label>\n<div class='row'><button type='button' id='upload-media'>رفع الملفات</button></div><p id='upload-status' class='mute' aria-live='polite'></p>\n<label>نص المنشور<textarea id='media-caption' placeholder='اكتب نص المنشور أو استخدم الميكروفون...'></textarea></label>\n<div class='row'><button type='button' id='voice-caption'>🎙️ احچي المنشور</button><button type='button' id='publish-best'>اختيار الأفضل ونشره على Facebook</button></div>\n<p class='mute' id='voice-status'>الميكروفون يحتاج إذن المتصفح ويدعم Chrome غالباً.</p></div>\n<script>\n(function(){\n const files=document.getElementById('media-files'), status=document.getElementById('upload-status');\n document.getElementById('upload-media').addEventListener('click',async()=>{\n  if(!files.files.length){status.textContent='اختار صورة أو فيديو أولاً.';return;}\n  for(const file of files.files){\n   if(file.size>30000000){status.textContent=file.name+': أكبر من 30 MB.';continue;}\n   status.textContent='جاري رفع '+file.name+'...';\n   const b64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});\n   try{const res=await fetch('/api/media/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,mime:file.type||'application/octet-stream',data:b64})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل الرفع');status.textContent='تم رفع '+file.name+' بنجاح.';}\n   catch(e){status.textContent='تعذر رفع '+file.name+': '+e.message;}\n  }\n });\n document.getElementById('voice-caption').addEventListener('click',()=>{\n  const SR=window.SpeechRecognition||window.webkitSpeechRecognition, msg=document.getElementById('voice-status');\n  if(!SR){msg.textContent='المتصفح لا يدعم الصوت إلى نص؛ جرّب Chrome على Android.';return;}\n  const rec=new SR();rec.lang='ar-IQ';rec.interimResults=false;rec.maxAlternatives=1;msg.textContent='احچي هسه...';\n  rec.onresult=e=>{const box=document.getElementById('media-caption');box.value+=(box.value?' ':'')+e.results[0][0].transcript;msg.textContent='تم تحويل كلامك إلى نص.';};\n  rec.onerror=e=>msg.textContent='تعذر استخدام الميكروفون: '+e.error;rec.start();\n });\n document.getElementById('publish-best').addEventListener('click',async()=>{\n  const msg=document.getElementById('voice-status'), caption=document.getElementById('media-caption').value.trim();\n  if(!caption){msg.textContent='اكتب أو املي نص المنشور أولاً.';return;}msg.textContent='جاري اختيار الملف ومحاولة النشر...';\n  try{const res=await fetch('/api/media/publish-best',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({caption})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل النشر');msg.textContent='تم النشر على '+d.platform+'.';}\n  catch(e){msg.textContent=e.message;}\n });\n})();\n</script>"
+
     body = f"""<header><h1>Dayluxe AI CEO</h1><div class='row'><form method='post' action='/ui/run'>
 <input type='submit' value='Run cycle now'></form><a href='/logout' class='mute'>Log out</a></div></header>
 {{MSG}}<p class='mute'>{last_txt}</p>
@@ -428,41 +430,7 @@ def dashboard_page(app: App) -> str:
 <div class='grid'>{kpis}</div>
 <div class='card'><h2>Today's priorities</h2><ul>{priorities}</ul><h2>Next steps</h2><ul>{steps}</ul></div>
 
-<div class='card' id='media-studio'><h2>Media studio — الصور والفيديو والصوت</h2>
-<p class='mute'>ارفع صور وفيديوهات شغل Dayluxe. الاختيار الحالي تقني حسب نوع الملف وحجمه وحداثته، وليس تحليلاً بصرياً كاملاً.</p>
-<label>اختيار صور أو فيديوهات<input id='media-files' type='file' accept='image/png,image/jpeg,image/webp,video/mp4,video/quicktime' multiple></label>
-<div class='row'><button type='button' id='upload-media'>رفع الملفات</button></div><p id='upload-status' class='mute' aria-live='polite'></p>
-<label>نص المنشور<textarea id='media-caption' placeholder='اكتب نص المنشور أو استخدم الميكروفون...'></textarea></label>
-<div class='row'><button type='button' id='voice-caption'>🎙️ احچي المنشور</button><button type='button' id='publish-best'>اختيار الأفضل ونشره على Facebook</button></div>
-<p class='mute' id='voice-status'>الميكروفون يحتاج إذن المتصفح ويدعم Chrome غالباً.</p></div>
-<script>
-(function(){
- const files=document.getElementById('media-files'), status=document.getElementById('upload-status');
- document.getElementById('upload-media').addEventListener('click',async()=>{
-  if(!files.files.length){status.textContent='اختار صورة أو فيديو أولاً.';return;}
-  for(const file of files.files){
-   if(file.size>30000000){status.textContent=file.name+': أكبر من 30 MB.';continue;}
-   status.textContent='جاري رفع '+file.name+'...';
-   const b64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});
-   try{const res=await fetch('/api/media/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,mime:file.type||'application/octet-stream',data:b64})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل الرفع');status.textContent='تم رفع '+file.name+' بنجاح.';}
-   catch(e){status.textContent='تعذر رفع '+file.name+': '+e.message;}
-  }
- });
- document.getElementById('voice-caption').addEventListener('click',()=>{
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition, msg=document.getElementById('voice-status');
-  if(!SR){msg.textContent='المتصفح لا يدعم الصوت إلى نص؛ جرّب Chrome على Android.';return;}
-  const rec=new SR();rec.lang='ar-IQ';rec.interimResults=false;rec.maxAlternatives=1;msg.textContent='احچي هسه...';
-  rec.onresult=e=>{const box=document.getElementById('media-caption');box.value+=(box.value?' ':'')+e.results[0][0].transcript;msg.textContent='تم تحويل كلامك إلى نص.';};
-  rec.onerror=e=>msg.textContent='تعذر استخدام الميكروفون: '+e.error;rec.start();
- });
- document.getElementById('publish-best').addEventListener('click',async()=>{
-  const msg=document.getElementById('voice-status'), caption=document.getElementById('media-caption').value.trim();
-  if(!caption){msg.textContent='اكتب أو املي نص المنشور أولاً.';return;}msg.textContent='جاري اختيار الملف ومحاولة النشر...';
-  try{const res=await fetch('/api/media/publish-best',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({caption})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل النشر');msg.textContent='تم النشر على '+d.platform+'.';}
-  catch(e){msg.textContent=e.message;}
- });
-})();
-</script>
+{media_ui}
 
 <h2>Waiting for your approval</h2>{''.join(approvals_html) or "<p class='mute'>Nothing waiting.</p>"}
 <div class='card wrap'><h2>System health</h2><table><tr><th>Service</th><th>Status</th><th>Detail</th></tr>{health_rows}</table></div>
