@@ -239,15 +239,18 @@ class IntakeAndApprovalTests(unittest.TestCase):
         self.assertEqual(res["status"], "failed")
         self.assertIn("Gmail is not connected", res["result"])
 
-    def test_autopilot_requires_both_switches(self) -> None:
-        ctx = make_ctx(auto_send_email=True)  # CEO_APPROVAL_REQUIRED still true
-        self.assertFalse(ApprovalManager(ctx).auto_allowed("email_reply", {}))
+    def test_autopilot_requires_both_switches_except_explicit_social_opt_in(self) -> None:
+        ctx = make_ctx(auto_send_email=True, auto_publish_social=True)  # CEO approval still required for email
+        am = ApprovalManager(ctx)
+        self.assertFalse(am.auto_allowed("email_reply", {}))
+        self.assertTrue(am.auto_allowed("social_post", {}))
+        self.assertFalse(am.auto_allowed("ad_campaign", {}))
+        self.assertFalse(am.auto_allowed("outreach_email", {}))
+        self.assertFalse(am.auto_allowed("seo_page_publish", {}))
         ctx2 = make_ctx(auto_send_email=True, ceo_approval_required=False)
         am2 = ApprovalManager(ctx2)
         self.assertTrue(am2.auto_allowed("email_reply", {}))
-        self.assertFalse(am2.auto_allowed("ad_campaign", {}))
-        self.assertFalse(am2.auto_allowed("outreach_email", {}))
-        self.assertFalse(am2.auto_allowed("seo_page_publish", {}))
+        self.assertFalse(am2.auto_allowed("social_post", {}))
 
     def test_ad_campaign_never_claims_live(self) -> None:
         ctx = make_ctx()
