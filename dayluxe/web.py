@@ -306,6 +306,66 @@ class Handler(BaseHTTPRequestHandler):
                 self.headers.get("Host", "").lower(), forwarded_host.lower(), public_host.lower(),
             )
             return self.json(403, {"error": "cross-origin request blocked"})
+        if path == "/api/chat":
+            data = self.read_body()
+            message = str(data.get("message", "")).strip()
+            if not message:
+                return self.json(400, {"error": "اكتب سؤالك أولاً."})
+            if len(message) > 2000:
+                return self.json(413, {"error": "الرسالة طويلة. اختصرها إلى 2000 حرف."})
+
+            history = data.get("history", [])
+            transcript = []
+            if isinstance(history, list):
+                for item in history[-8:]:
+                    if not isinstance(item, dict):
+                        continue
+                    role = str(item.get("role", ""))
+                    text_value = str(item.get("content", "")).strip()[:1200]
+                    if role in ("user", "assistant") and text_value:
+                        transcript.append(("المالك" if role == "user" else "DAYLUXE AI") + ": " + text_value)
+            conversation = "\n".join(transcript) or "(بداية المحادثة)"
+
+            try:
+                counts = app.ceo.dashboard_data().get("counts", {})
+                leads = app.ctx.storage.list_leads(None, 8)
+                lead_summary = "\n".join(
+                    "- " + " | ".join(str(lead.get(k) or "") for k in ("name", "service", "suburb", "status"))
+                    for lead in leads
+                ) or "لا توجد سجلات عملاء ظاهرة حالياً."
+                dashboard_summary = (
+                    f"أرقام اللوحة: عملاء جدد={counts.get('leads_new', 'غير متاح')}, "
+                    f"موافقات معلقة={counts.get('approvals_pending', 'غير متاح')}, "
+                    f"عروض أسعار معلقة={counts.get('quotes_pending', 'غير متاح')}.\n"
+                    f"آخر العملاء (الاسم، الخدمة، المنطقة، الحالة):\n{lead_summary}"
+                )
+            except Exception:
+                dashboard_summary = "تعذر جلب ملخص اللوحة حالياً."
+
+            prompt = f"""أنت DAYLUXE AI، مساعد المالك الخاص لشركة Dayluxe Roofing & Property Services في سيدني.
+تحدث مع المالك باللهجة العراقية الواضحة وبشكل عملي ومختصر. افهم أسئلته عن العملاء، الشغل، عروض الأسعار، الإيميلات، التسويق والموقع.
+استخدم فقط المعلومات المؤكدة في سياق المحادثة وملخص اللوحة. لا تخترع أسماء عملاء أو أسعاراً أو مواعيد أو ضمانات.
+هذه محادثة استشارية فقط: لا تدّعِ أنك أرسلت إيميلاً أو نشرت منشوراً أو غيّرت بيانات أو نفذت أي إجراء.
+إذا طلب المالك إرسال إيميل أو عرض سعر أو نشر محتوى أو صرف ميزانية أو تغييراً حساساً، جهّز مسودة أو اشرح الخطوة التالية وقل إن التنفيذ يحتاج موافقته من لوحة النظام. لا تنفذ إجراءات خارجية من المحادثة.
+إذا كانت خدمة الذكاء الاصطناعي أو البيانات غير متاحة، وضّح ذلك ولا تخمّن.
+
+ملخص لوحة النظام:
+{dashboard_summary}
+
+المحادثة السابقة:
+{conversation}
+
+رسالة المالك الحالية:
+{message}
+
+أجب عن رسالة المالك الحالية مباشرة باللهجة العراقية، بدون مقدمات طويلة."""
+            fallback = "هسه ما أگدر أجاوبك من الذكاء الاصطناعي. تأكد من إعدادات OpenAI أو Gemini ورصيد الخدمة، وبعدها جرّب مرة ثانية."
+            result = app.ctx.llm.generate(prompt, fallback, max_tokens=500)
+            if result.provider == "template":
+                log.warning("voice assistant chat unavailable: provider=%s error=%s", result.provider, result.error or "not configured")
+                return self.json(503, {"error": fallback, "provider": result.provider})
+            return self.json(200, {"reply": result.text, "provider": result.provider})
+
         who = "owner"
 
         if path in ("/api/run", "/ui/run"):
@@ -454,6 +514,87 @@ def dashboard_page(app: App) -> str:
 
     media_ui = "<div class='card' id='media-studio'><h2>Media studio — الصور والفيديو والصوت</h2>\n<p class='mute'>ارفع صور وفيديوهات شغل Dayluxe. الاختيار الحالي تقني حسب نوع الملف وحجمه وحداثته، وليس تحليلاً بصرياً كاملاً.</p>\n<label>اختيار صور أو فيديوهات<input id='media-files' type='file' accept='image/png,image/jpeg,image/webp,video/mp4,video/quicktime' multiple></label>\n<div class='row'><button type='button' id='upload-media'>رفع الملفات</button></div><p id='upload-status' class='mute' aria-live='polite'></p>\n<label>نص المنشور<textarea id='media-caption' placeholder='اكتب نص المنشور أو استخدم الميكروفون...'></textarea></label>\n<div class='row'><button type='button' id='voice-caption'>🎙️ احچي المنشور</button><button type='button' id='publish-best'>اختيار الأفضل ونشره على Facebook</button></div>\n<p class='mute' id='voice-status'>الميكروفون يحتاج إذن المتصفح ويدعم Chrome غالباً.</p></div>\n<script>\n(function(){\n const files=document.getElementById('media-files'), status=document.getElementById('upload-status');\n document.getElementById('upload-media').addEventListener('click',async()=>{\n  if(!files.files.length){status.textContent='اختار صورة أو فيديو أولاً.';return;}\n  for(const file of files.files){\n   if(file.size>30000000){status.textContent=file.name+': أكبر من 30 MB.';continue;}\n   status.textContent='جاري رفع '+file.name+'...';\n   const b64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});\n   try{const res=await fetch('/api/media/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,mime:file.type||'application/octet-stream',data:b64})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل الرفع');status.textContent='تم رفع '+file.name+' بنجاح.';}\n   catch(e){status.textContent='تعذر رفع '+file.name+': '+e.message;}\n  }\n });\n document.getElementById('voice-caption').addEventListener('click',()=>{\n  const SR=window.SpeechRecognition||window.webkitSpeechRecognition, msg=document.getElementById('voice-status');\n  if(!SR){msg.textContent='المتصفح لا يدعم الصوت إلى نص؛ جرّب Chrome على Android.';return;}\n  const rec=new SR();rec.lang='ar-IQ';rec.interimResults=false;rec.maxAlternatives=1;msg.textContent='احچي هسه...';\n  rec.onresult=e=>{const box=document.getElementById('media-caption');box.value+=(box.value?' ':'')+e.results[0][0].transcript;msg.textContent='تم تحويل كلامك إلى نص.';};\n  rec.onerror=e=>msg.textContent='تعذر استخدام الميكروفون: '+e.error;rec.start();\n });\n document.getElementById('publish-best').addEventListener('click',async()=>{\n  const msg=document.getElementById('voice-status'), caption=document.getElementById('media-caption').value.trim();\n  if(!caption){msg.textContent='اكتب أو املي نص المنشور أولاً.';return;}msg.textContent='جاري اختيار الملف ومحاولة النشر...';\n  try{const res=await fetch('/api/media/publish-best',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({caption})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل النشر');msg.textContent='تم النشر على '+d.platform+'.';}\n  catch(e){msg.textContent=e.message;}\n });\n})();\n</script>"
 
+    voice_assistant_ui = """
+<div class='card' id='voice-assistant'>
+<h2>المساعد الصوتي DAYLUXE AI</h2>
+<p class='mute'>احچي عن العملاء والشغل، أو اكتب سؤالك. الرد الصوتي يستخدم صوت المتصفح إذا كان مدعوماً. المساعد لا يرسل ولا ينشر أي شيء من هذه المحادثة.</p>
+<div id='chat-log' role='log' aria-live='polite' style='max-height:260px;overflow:auto;padding:8px;background:var(--bg);border-radius:8px'>
+<p class='ar'>هلا بيك، آني DAYLUXE AI. اسألني عن شغل Dayluxe أو العملاء الظاهرين باللوحة.</p>
+</div>
+<label>اكتب رسالتك<textarea id='chat-input' rows='3' placeholder='مثلاً: شنو أولويات الشغل اليوم؟'></textarea></label>
+<div class='row'>
+<button type='button' id='chat-send'>إرسال</button>
+<button type='button' id='chat-mic'>🎙️ احچي ويا DAYLUXE AI</button>
+<button type='button' id='chat-stop-speech' class='secondary'>إيقاف الصوت</button>
+</div>
+<label class='mute'><input type='checkbox' id='chat-speak' checked> اقرأ رد المساعد بصوت</label>
+<p class='mute' id='chat-status' aria-live='polite'>جاهز للمحادثة. يحتاج الميكروفون إذن المتصفح، وتحتاج الإجابات الذكية إلى مفتاح API ورصيد فعّال.</p>
+</div>
+<script>
+(function(){
+ const input=document.getElementById('chat-input');
+ const logBox=document.getElementById('chat-log');
+ const status=document.getElementById('chat-status');
+ const history=[];
+ function addMessage(role,text){
+  const p=document.createElement('p');
+  p.className=role==='user'?'':'ar';
+  p.textContent=(role==='user'?'أنت: ':'DAYLUXE AI: ')+text;
+  logBox.appendChild(p);
+  logBox.scrollTop=logBox.scrollHeight;
+ }
+ function speak(text){
+  if(!document.getElementById('chat-speak').checked || !('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const utterance=new SpeechSynthesisUtterance(text);
+  utterance.lang='ar-IQ';
+  utterance.rate=0.95;
+  window.speechSynthesis.speak(utterance);
+ }
+ async function sendMessage(overrideText){
+  const message=(overrideText||input.value).trim();
+  if(!message){status.textContent='اكتب سؤالك أو اضغط الميكروفون واحچي.';return;}
+  input.value='';
+  addMessage('user',message);
+  history.push({role:'user',content:message});
+  status.textContent='دا أفهم سؤالك وأجهز الرد...';
+  document.getElementById('chat-send').disabled=true;
+  try{
+   const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,history:history.slice(-8)})});
+   const data=await response.json();
+   if(!response.ok) throw new Error(data.error||'ما كدرت أجيب الرد.');
+   const reply=String(data.reply||'ما وصل رد من المساعد.');
+   addMessage('assistant',reply);
+   history.push({role:'assistant',content:reply});
+   status.textContent='وصل الرد.';
+   speak(reply);
+  }catch(e){
+   status.textContent=e.message||'صار خطأ بالاتصال. جرّب مرة ثانية.';
+  }finally{
+   document.getElementById('chat-send').disabled=false;
+  }
+ }
+ document.getElementById('chat-send').addEventListener('click',()=>sendMessage());
+ input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
+ document.getElementById('chat-mic').addEventListener('click',()=>{
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){status.textContent='المتصفح ما يدعم تحويل الصوت إلى نص. افتح النظام بآخر نسخة من Chrome على Android.';return;}
+  const rec=new SR();
+  rec.lang='ar-IQ';rec.interimResults=false;rec.maxAlternatives=1;
+  status.textContent='دا أسمعك هسه... احچي.';
+  rec.onresult=e=>{const heard=e.results&&e.results[0]&&e.results[0][0]?e.results[0][0].transcript:'';if(heard){status.textContent='سمعت: '+heard;sendMessage(heard);}else status.textContent='ما التقطت كلام واضح. جرّب مرة ثانية.';};
+  rec.onerror=e=>{status.textContent='تعذر تشغيل الميكروفون: '+e.error+'. تأكد من إذن الميكروفون في Chrome.';};
+  rec.onend=()=>{if(status.textContent==='دا أسمعك هسه... احچي.') status.textContent='انتهى الاستماع. جرّب مرة ثانية إذا ما التقط الكلام.';};
+  try{rec.start();}catch(e){status.textContent='ما كدرت أشغل الميكروفون. جرّب مرة ثانية.';}
+ });
+ document.getElementById('chat-stop-speech').addEventListener('click',()=>{
+  if('speechSynthesis' in window) window.speechSynthesis.cancel();
+  status.textContent='تم إيقاف قراءة الرد.';
+ });
+})();
+</script>
+"""
+
     body = f"""<header><h1>Dayluxe AI CEO</h1><div class='row'><form method='post' action='/ui/run'>
 <input type='submit' value='Run cycle now'></form><a href='/logout' class='mute'>Log out</a></div></header>
 {{MSG}}<p class='mute'>{last_txt}</p>
@@ -461,6 +602,7 @@ def dashboard_page(app: App) -> str:
 <div class='grid'>{kpis}</div>
 <div class='card'><h2>Today's priorities</h2><ul>{priorities}</ul><h2>Next steps</h2><ul>{steps}</ul></div>
 
+{voice_assistant_ui}
 {media_ui}
 
 <h2>Waiting for your approval</h2>{''.join(approvals_html) or "<p class='mute'>Nothing waiting.</p>"}
