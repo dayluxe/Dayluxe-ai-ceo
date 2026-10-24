@@ -37,7 +37,7 @@ python -m dayluxe serve           # لوحة التحكم على http://localhos
 ## النشر على Render
 
 1. ارفع المجلد على GitHub (ملف `.gitignore` يمنع رفع `.env` والبيانات).
-2. Render ← **New → Blueprint** ← اختار الـ repo. ملف `render.yaml` يسوي كلشي: خدمة ويب + قرص دائم للبيانات + توكنات عشوائية.
+2. Render ← **New → Blueprint** ← اختار الـ repo. ملف `render.yaml` ينشئ خدمة ويب وتوكنات عشوائية. الخطة المجانية ما بيها قرص دائم، لذلك قاعدة البيانات ممكن تنمسح بعد restart أو deploy؛ إذا تريد حفظ دائم، تحتاج خطة مدفوعة وقرص دائم.
 3. بالـ Environment عبّي المفاتيح اللي عندك (Gmail، WordPress، Meta، OpenAI أو Gemini).
 4. `ADMIN_TOKEN` المولّد تلقائياً هو كلمة سر الدخول للوحة.
 5. ارفع أسعارك: انسخ محتوى `pricing.example.json` إلى `/var/data/pricing.json` (من Render Shell).
