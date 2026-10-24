@@ -117,7 +117,14 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if not origin:
             return True
-        return urllib.parse.urlsplit(origin).netloc == self.headers.get("Host", "")
+        origin_host = urllib.parse.urlsplit(origin).netloc.lower()
+        allowed_hosts = {
+            self.headers.get("Host", "").lower(),
+            self.headers.get("X-Forwarded-Host", "").split(",", 1)[0].strip().lower(),
+            urllib.parse.urlsplit(self.app.ctx.settings.public_base_url).netloc.lower(),
+        }
+        allowed_hosts.discard("")
+        return origin_host in allowed_hosts
 
     # ------------------------------------------------------------ routing
     def do_HEAD(self) -> None:  # noqa: N802
