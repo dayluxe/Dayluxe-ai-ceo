@@ -44,14 +44,16 @@ class ApprovalManager:
     # ------------------------------------------------------------- policy
     def auto_allowed(self, kind: str, payload: dict[str, Any]) -> bool:
         s = self.ctx.settings
+        # Social autopublishing is an explicit, independent opt-in. Other action
+        # types still require CEO_APPROVAL_REQUIRED=false plus their own AUTO_* switch.
+        if kind == "social_post":
+            return s.auto_publish_social
         if s.ceo_approval_required:
             return False
         if kind in ("email_reply", "followup"):
             return s.auto_send_email and not payload.get("sensitive")
         if kind == "quote":
             return s.auto_send_quotes and not payload.get("missing")
-        if kind == "social_post":
-            return s.auto_publish_social
         # seo_page_publish (significant website change), outreach_email (bulk/compliance),
         # ad_campaign (money) and owner_attention are never automatic.
         return False
