@@ -283,6 +283,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authed():
             return self.json(401, {"error": "unauthorized"})
         if not self.same_origin():
+            origin = self.headers.get("Origin", "")
+            forwarded_host = self.headers.get("X-Forwarded-Host", "")
+            public_host = urllib.parse.urlsplit(self.app.ctx.settings.public_base_url).netloc
+            log.warning(
+                "Blocked cross-origin request path=%s origin_host=%r host=%r forwarded_host=%r public_host=%r",
+                path, urllib.parse.urlsplit(origin).netloc.lower(),
+                self.headers.get("Host", "").lower(), forwarded_host.lower(), public_host.lower(),
+            )
             return self.json(403, {"error": "cross-origin request blocked"})
         who = "owner"
 
