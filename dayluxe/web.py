@@ -123,14 +123,17 @@ class Handler(BaseHTTPRequestHandler):
         allowed_hosts.discard("")
         if not origin:
             return True
+        origin_value = origin.strip().lower()
         origin_host = urllib.parse.urlsplit(origin).netloc.lower()
         if origin_host:
             return origin_host in allowed_hosts
-        # Some browser/webview form submissions send Origin: null. Accept that
-        # only when the Referer independently confirms the same trusted host.
-        referer = self.headers.get("Referer", "")
-        referer_host = urllib.parse.urlsplit(referer).netloc.lower()
-        return origin.strip().lower() == "null" and bool(referer_host) and referer_host in allowed_hosts
+        if origin_value == "null":
+            # Opaque-origin browsers/webviews may send Origin: null. Permit
+            # only a browser-asserted same-origin request to our trusted host.
+            fetch_site = self.headers.get("Sec-Fetch-Site", "").strip().lower()
+            request_host = self.headers.get("Host", "").strip().lower()
+            return fetch_site == "same-origin" and request_host in allowed_hosts
+        return False
 
     # ------------------------------------------------------------ routing
     def do_HEAD(self) -> None:  # noqa: N802
