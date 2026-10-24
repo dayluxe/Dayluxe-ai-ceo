@@ -115,16 +115,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def same_origin(self) -> bool:
         origin = self.headers.get("Origin")
-        if not origin:
-            return True
-        origin_host = urllib.parse.urlsplit(origin).netloc.lower()
         allowed_hosts = {
             self.headers.get("Host", "").lower(),
             self.headers.get("X-Forwarded-Host", "").split(",", 1)[0].strip().lower(),
             urllib.parse.urlsplit(self.app.ctx.settings.public_base_url).netloc.lower(),
         }
         allowed_hosts.discard("")
-        return origin_host in allowed_hosts
+        if not origin:
+            return True
+        origin_host = urllib.parse.urlsplit(origin).netloc.lower()
+        if origin_host:
+            return origin_host in allowed_hosts
+        # Some browser/webview form submissions send Origin: null. Accept that
+        # only when the Referer independently confirms the same trusted host.
+        referer = self.headers.get("Referer", "")
+        referer_host = urllib.parse.urlsplit(referer).netloc.lower()
+        return origin.strip().lower() == "null" and bool(referer_host) and referer_host in allowed_hosts
 
     # ------------------------------------------------------------ routing
     def do_HEAD(self) -> None:  # noqa: N802
