@@ -169,6 +169,8 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/"):
                 return self.json(401, {"error": "unauthorized"})
             return self.redirect("/login")
+        if path == "/ui/run":
+            return self.redirect("/?msg=" + urllib.parse.quote("Use the Run cycle now button on the dashboard to start a cycle"))
 
         st = self.app.ctx.storage
         if path == "/":
