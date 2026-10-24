@@ -22,9 +22,9 @@ from .ceo import CEO
 
 log = logging.getLogger(__name__)
 
-MAX_BODY = 1_000_000
+MAX_BODY = 45_000_000
 COOKIE = "dlx_session"
-_MEDIA_RE = re.compile(r"^[a-f0-9]{24}\.png$")
+_MEDIA_RE = re.compile(r"^[a-f0-9]{24}\.(?:png|jpg|jpeg|webp|mp4|mov)$")
 _ROUTE_ID = re.compile(r"^/(?:api|ui)/approvals/(\d+)(?:/(approve|reject))?$")
 
 
@@ -149,7 +149,10 @@ class Handler(BaseHTTPRequestHandler):
             name = path.rsplit("/", 1)[-1]
             f = self.app.media_dir / name
             if _MEDIA_RE.match(name) and f.is_file():
-                return self._send(200, f.read_bytes(), "image/png", {"Cache-Control": "public, max-age=86400"})
+                suffix = f.suffix.lower()
+                mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                        ".webp": "image/webp", ".mp4": "video/mp4", ".mov": "video/quicktime"}.get(suffix, "application/octet-stream")
+                return self._send(200, f.read_bytes(), mime, {"Cache-Control": "public, max-age=86400"})
             return self.json(404, {"error": "not found"})
         if path == "/login":
             return self.html_page(200, login_page())
@@ -193,6 +196,58 @@ class Handler(BaseHTTPRequestHandler):
     def _post(self) -> None:
         path = urllib.parse.urlsplit(self.path).path.rstrip("/")
         app = self.app
+
+
+        if path == "/api/media/upload":
+            data = self.read_body()
+            filename = str(data.get("filename", ""))
+            mime = str(data.get("mime", "")).lower()
+            encoded = str(data.get("data", ""))
+            allowed = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                       ".webp": "image/webp", ".mp4": "video/mp4", ".mov": "video/quicktime"}
+            suffix = Path(filename).suffix.lower()
+            if suffix not in allowed or mime not in {allowed[suffix], "application/octet-stream"}:
+                return self.json(415, {"error": "Use PNG/JPG/WEBP images or MP4/MOV videos."})
+            try:
+                raw = __import__("base64").b64decode(encoded, validate=True)
+            except Exception:
+                return self.json(400, {"error": "Invalid file data"})
+            if not raw or len(raw) > 30_000_000:
+                return self.json(413, {"error": "Each file must be smaller than 30 MB."})
+            digest = __import__("hashlib").sha256(raw).hexdigest()[:24]
+            stored_name = digest + suffix
+            app.media_dir.mkdir(parents=True, exist_ok=True)
+            (app.media_dir / stored_name).write_bytes(raw)
+            public_url = app.ctx.settings.public_base_url.rstrip("/") + "/media/" + stored_name if app.ctx.settings.public_base_url else ""
+            return self.json(201, {"ok": True, "filename": stored_name, "url": public_url,
+                                   "type": "video" if suffix in (".mp4", ".mov") else "image", "bytes": len(raw)})
+
+        if path == "/api/media/publish-best":
+            data = self.read_body()
+            caption = str(data.get("caption", "")).strip()
+            if not caption:
+                return self.json(400, {"error": "Write or dictate a caption first."})
+            if not app.ctx.meta.configured:
+                return self.json(503, {"error": "Meta is not connected yet. Upload works, but publishing needs Facebook Page credentials."})
+            files = [p for p in app.media_dir.iterdir() if p.is_file() and _MEDIA_RE.match(p.name)]
+            if not files:
+                return self.json(400, {"error": "Upload at least one image or video first."})
+            videos = [p for p in files if p.suffix.lower() in (".mp4", ".mov")]
+            candidates = videos or [p for p in files if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")]
+            if not candidates:
+                return self.json(400, {"error": "No supported media found."})
+            best = max(candidates, key=lambda p: (p.stat().st_size, p.stat().st_mtime))
+            if not app.ctx.settings.public_base_url:
+                return self.json(503, {"error": "Set PUBLIC_BASE_URL in Render before publishing media."})
+            media_url = app.ctx.settings.public_base_url.rstrip("/") + "/media/" + best.name
+            if best.suffix.lower() in (".mp4", ".mov"):
+                post_id = app.ctx.meta.publish_facebook_video(caption, media_url)
+                platform = "Facebook video"
+            else:
+                post_id = app.ctx.meta.publish_facebook(caption, media_url)
+                platform = "Facebook photo"
+            app.ctx.storage.log_action("media", "publish selected media", "completed", f"{platform}; asset={best.name}; post={post_id}")
+            return self.json(200, {"ok": True, "platform": platform, "filename": best.name, "post_id": post_id})
 
         if path == "/webhook/lead":
             secret = self.headers.get("X-Webhook-Secret", "")
@@ -372,6 +427,43 @@ def dashboard_page(app: App) -> str:
 {f"<div class='card'><b>Configuration warnings</b><ul>{warn}</ul></div>" if warn else ''}
 <div class='grid'>{kpis}</div>
 <div class='card'><h2>Today's priorities</h2><ul>{priorities}</ul><h2>Next steps</h2><ul>{steps}</ul></div>
+
+<div class='card' id='media-studio'><h2>Media studio — الصور والفيديو والصوت</h2>
+<p class='mute'>ارفع صور وفيديوهات شغل Dayluxe. الاختيار الحالي تقني حسب نوع الملف وحجمه وحداثته، وليس تحليلاً بصرياً كاملاً.</p>
+<label>اختيار صور أو فيديوهات<input id='media-files' type='file' accept='image/png,image/jpeg,image/webp,video/mp4,video/quicktime' multiple></label>
+<div class='row'><button type='button' id='upload-media'>رفع الملفات</button></div><p id='upload-status' class='mute' aria-live='polite'></p>
+<label>نص المنشور<textarea id='media-caption' placeholder='اكتب نص المنشور أو استخدم الميكروفون...'></textarea></label>
+<div class='row'><button type='button' id='voice-caption'>🎙️ احچي المنشور</button><button type='button' id='publish-best'>اختيار الأفضل ونشره على Facebook</button></div>
+<p class='mute' id='voice-status'>الميكروفون يحتاج إذن المتصفح ويدعم Chrome غالباً.</p></div>
+<script>
+(function(){
+ const files=document.getElementById('media-files'), status=document.getElementById('upload-status');
+ document.getElementById('upload-media').addEventListener('click',async()=>{
+  if(!files.files.length){status.textContent='اختار صورة أو فيديو أولاً.';return;}
+  for(const file of files.files){
+   if(file.size>30000000){status.textContent=file.name+': أكبر من 30 MB.';continue;}
+   status.textContent='جاري رفع '+file.name+'...';
+   const b64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});
+   try{const res=await fetch('/api/media/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,mime:file.type||'application/octet-stream',data:b64})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل الرفع');status.textContent='تم رفع '+file.name+' بنجاح.';}
+   catch(e){status.textContent='تعذر رفع '+file.name+': '+e.message;}
+  }
+ });
+ document.getElementById('voice-caption').addEventListener('click',()=>{
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition, msg=document.getElementById('voice-status');
+  if(!SR){msg.textContent='المتصفح لا يدعم الصوت إلى نص؛ جرّب Chrome على Android.';return;}
+  const rec=new SR();rec.lang='ar-IQ';rec.interimResults=false;rec.maxAlternatives=1;msg.textContent='احچي هسه...';
+  rec.onresult=e=>{const box=document.getElementById('media-caption');box.value+=(box.value?' ':'')+e.results[0][0].transcript;msg.textContent='تم تحويل كلامك إلى نص.';};
+  rec.onerror=e=>msg.textContent='تعذر استخدام الميكروفون: '+e.error;rec.start();
+ });
+ document.getElementById('publish-best').addEventListener('click',async()=>{
+  const msg=document.getElementById('voice-status'), caption=document.getElementById('media-caption').value.trim();
+  if(!caption){msg.textContent='اكتب أو املي نص المنشور أولاً.';return;}msg.textContent='جاري اختيار الملف ومحاولة النشر...';
+  try{const res=await fetch('/api/media/publish-best',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({caption})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل النشر');msg.textContent='تم النشر على '+d.platform+'.';}
+  catch(e){msg.textContent=e.message;}
+ });
+})();
+</script>
+
 <h2>Waiting for your approval</h2>{''.join(approvals_html) or "<p class='mute'>Nothing waiting.</p>"}
 <div class='card wrap'><h2>System health</h2><table><tr><th>Service</th><th>Status</th><th>Detail</th></tr>{health_rows}</table></div>
 <div class='card wrap'><h2>Leads</h2><table><tr><th>#</th><th>Customer</th><th>Service</th><th>Suburb</th><th>Score</th>
