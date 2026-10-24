@@ -480,6 +480,10 @@ class WebTests(unittest.TestCase):
         status = json.loads(body)
         self.assertEqual(status["counts"]["leads_new"], 1)
         self.assertNotIn(TOKEN, body)
+        # Chat is authenticated and fails honestly when no AI provider is configured.
+        code, chat_body, _ = self.req("POST", "/api/chat", {"message": "شنو وضع العملاء؟", "history": []}, auth)
+        self.assertEqual(code, 503)
+        self.assertIn("الذكاء الاصطناعي", json.loads(chat_body)["error"])
         aid = status["pending_approvals"][0]["id"]
         code, body, _ = self.req("POST", f"/api/approvals/{aid}/reject", {}, auth)
         self.assertEqual((code, json.loads(body)["status"]), (200, "rejected"))
@@ -493,6 +497,8 @@ class WebTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn("Dayluxe AI CEO", page)
         self.assertIn("System health", page)
+        self.assertIn("voice-assistant", page)
+        self.assertIn("احچي ويا DAYLUXE AI", page)
         code, _, _ = self.req("POST", "/ui/run", {}, {"Cookie": cookie, "Origin": "https://evil.example"}, form=True)
         self.assertEqual(code, 403)
         code, _, hdrs = self.req("POST", "/ui/run", {}, {"Cookie": cookie}, form=True)
