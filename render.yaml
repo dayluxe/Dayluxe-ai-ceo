@@ -23,7 +23,7 @@ services:
       - key: AUTO_SEND_EMAIL
         value: "false"
       - key: AUTO_PUBLISH_SOCIAL
-        value: "false"
+        value: "true"
       - key: AUTO_SPEND_AD_BUDGET
         value: "false"
       - key: AUTO_SEND_QUOTES

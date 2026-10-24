@@ -37,7 +37,7 @@ python -m dayluxe serve           # لوحة التحكم على http://localhos
 ## النشر على Render
 
 1. ارفع المجلد على GitHub (ملف `.gitignore` يمنع رفع `.env` والبيانات).
-2. Render ← **New → Blueprint** ← اختار الـ repo. ملف `render.yaml` يسوي كلشي: خدمة ويب + قرص دائم للبيانات + توكنات عشوائية.
+2. Render ← **New → Blueprint** ← اختار الـ repo. ملف `render.yaml` ينشئ خدمة ويب وتوكنات عشوائية. الخطة المجانية ما بيها قرص دائم، لذلك قاعدة البيانات ممكن تنمسح بعد restart أو deploy؛ إذا تريد حفظ دائم، تحتاج خطة مدفوعة وقرص دائم.
 3. بالـ Environment عبّي المفاتيح اللي عندك (Gmail، WordPress، Meta، OpenAI أو Gemini).
 4. `ADMIN_TOKEN` المولّد تلقائياً هو كلمة سر الدخول للوحة.
 5. ارفع أسعارك: انسخ محتوى `pricing.example.json` إلى `/var/data/pricing.json` (من Render Shell).
@@ -68,8 +68,11 @@ python -m dayluxe serve           # لوحة التحكم على http://localhos
 ```
 AUTO_SEND_EMAIL=false  AUTO_PUBLISH_SOCIAL=false  AUTO_SPEND_AD_BUDGET=false
 AUTO_SEND_QUOTES=false CEO_APPROVAL_REQUIRED=true
+
+Social autopublishing is an independent explicit opt-in: setting `AUTO_PUBLISH_SOCIAL=true` allows scheduled social posts to publish without changing the approval policy for emails, quotes, ads, outreach, or website pages. Confirm Meta permissions and public image availability first; Instagram publishing requires a public image URL.
 ```
-- الشي يتنفذ تلقائياً **فقط** إذا مفتاح `AUTO_*` الخاص بيه `true` **و** `CEO_APPROVAL_REQUIRED=false`.
+- الإيميلات وعروض الأسعار تتنفذ تلقائياً **فقط** إذا مفتاح `AUTO_*` الخاص بيها `true` **و** `CEO_APPROVAL_REQUIRED=false`.
+- النشر الاجتماعي فقط يشتغل تلقائياً إذا `AUTO_PUBLISH_SOCIAL=true`، وهو خيار مستقل وصريح.
 - الإعلانات، الإيميلات التعريفية، نشر صفحات الموقع، والشكاوى: **دائماً** تحتاج موافقتك مهما كانت الإعدادات.
 - كل موافقة تتسجل: منو وافق، متى، وهل التنفيذ نجح فعلاً (النظام ما يقول "تم" إلا إذا الخدمة أكدت).
 - تكدر تعدل نص الإيميل أو المنشور باللوحة قبل ما توافق.

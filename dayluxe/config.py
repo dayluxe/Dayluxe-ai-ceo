@@ -101,7 +101,7 @@ class Settings:
     # AI providers
     text_provider: str = "auto"  # auto | openai | gemini | none
     openai_api_key: str = ""
-    openai_text_model: str = "gpt-6-luna"
+    openai_text_model: str = "gpt-5.2"
     openai_image_model: str = "gpt-image-2.5-flare"
     gemini_api_key: str = ""
     gemini_text_model: str = "gemini-3.5-flash-lite"
