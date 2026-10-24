@@ -6,6 +6,7 @@ import html
 import json
 import logging
 import re
+import secrets
 import threading
 import time
 import urllib.parse
@@ -79,8 +80,12 @@ class Handler(BaseHTTPRequestHandler):
         self._send(status, json.dumps(data, default=str, ensure_ascii=False).encode(), "application/json; charset=utf-8")
 
     def html_page(self, status: int, body: str) -> None:
+        # Allow only this response's inline scripts, without enabling unsafe-inline.
+        nonce = secrets.token_urlsafe(18)
+        body = body.replace("<script>", f"<script nonce='{nonce}'>")
+        csp = f"default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'unsafe-inline'; img-src 'self' data:"
         self._send(status, body.encode(), "text/html; charset=utf-8",
-                   {"Content-Security-Policy": "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:"})
+                   {"Content-Security-Policy": csp})
 
     def redirect(self, location: str, extra: dict[str, str] | None = None) -> None:
         hdrs = {"Location": location}
