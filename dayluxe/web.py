@@ -116,7 +116,9 @@ class Handler(BaseHTTPRequestHandler):
         return cookie[COOKIE].value if COOKIE in cookie else ""
 
     def authed(self) -> bool:
-        return self.app.check_token(self.token_from_request())
+        # PUBLIC DASHBOARD MODE: no login required. Anyone with the URL can access
+        # dashboard data and controls; enable only when the owner explicitly requests it.
+        return True
 
     def same_origin(self) -> bool:
         origin = self.headers.get("Origin")
