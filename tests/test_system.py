@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import tempfile
+import sqlite3
 import threading
 import unittest
 import urllib.error
@@ -262,6 +263,21 @@ class IntakeAndApprovalTests(unittest.TestCase):
         self.assertIn("NOT launched", res["result"])
         self.assertEqual(ctx.storage.get_approval(ad["id"])["status"], "approved")
 
+    def test_backup_snapshot_can_be_restored(self) -> None:
+        source = Storage(":memory:")
+        lead_id, _ = source.upsert_lead({"name": "Backup Test", "email": "backup@example.com"},
+                                        {"source": "test", "external_id": "backup-1"})
+        payload = source.backup_bytes()
+        self.assertTrue(payload.startswith(b"SQLite format 3"))
+        restored = sqlite3.connect(":memory:")
+        try:
+            restored.deserialize(payload)
+            row = restored.execute("SELECT name,email FROM leads WHERE id=?", (lead_id,)).fetchone()
+            self.assertEqual(row, ("Backup Test", "backup@example.com"))
+        finally:
+            restored.close()
+            source.close()
+
 
 class QuoteTests(unittest.TestCase):
     def _pricing(self, data: dict[str, Any]) -> str:
@@ -480,6 +496,10 @@ class WebTests(unittest.TestCase):
         self.assertEqual(code, 422)
         code, body, _ = self.req("GET", "/api/status", headers=auth)
         self.assertEqual(code, 200)
+        backup_code, backup_body, backup_headers = self.req("GET", "/api/backup", headers=auth)
+        self.assertEqual(backup_code, 200)
+        self.assertTrue(backup_body.encode().startswith(b"SQLite format 3"))
+        self.assertIn("dayluxe-backup.sqlite3", backup_headers.get("Content-Disposition", ""))
         status = json.loads(body)
         self.assertEqual(status["counts"]["leads_new"], 1)
         self.assertNotIn(TOKEN, body)
