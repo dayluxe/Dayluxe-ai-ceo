@@ -475,9 +475,9 @@ class WebTests(unittest.TestCase):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
         try:
             with opener.open(r, timeout=10) as resp:
-                return resp.status, resp.read().decode(), dict(resp.headers)
+                return resp.status, resp.read().decode(errors="replace"), dict(resp.headers)
         except urllib.error.HTTPError as e:
-            return e.code, e.read().decode(), dict(e.headers)
+            return e.code, e.read().decode(errors="replace"), dict(e.headers)
 
     def test_flow(self) -> None:
         auth = {"Authorization": f"Bearer {TOKEN}"}
@@ -498,7 +498,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(code, 200)
         backup_code, backup_body, backup_headers = self.req("GET", "/api/backup", headers=auth)
         self.assertEqual(backup_code, 200)
-        self.assertTrue(backup_body.encode().startswith(b"SQLite format 3"))
+        self.assertTrue(backup_body.startswith("SQLite format 3"))
         self.assertIn("dayluxe-backup.sqlite3", backup_headers.get("Content-Disposition", ""))
         status = json.loads(body)
         self.assertEqual(status["counts"]["leads_new"], 1)
