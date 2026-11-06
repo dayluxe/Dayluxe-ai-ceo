@@ -245,7 +245,7 @@ class IntakeAndApprovalTests(unittest.TestCase):
         ctx = make_ctx(auto_send_email=True, auto_publish_social=True)  # CEO approval still required for email
         am = ApprovalManager(ctx)
         self.assertFalse(am.auto_allowed("email_reply", {}))
-        self.assertTrue(am.auto_allowed("social_post", {}))
+        self.assertFalse(am.auto_allowed("social_post", {}))  # global owner-approval lock wins
         self.assertFalse(am.auto_allowed("ad_campaign", {}))
         self.assertFalse(am.auto_allowed("outreach_email", {}))
         self.assertFalse(am.auto_allowed("seo_page_publish", {}))
@@ -253,6 +253,8 @@ class IntakeAndApprovalTests(unittest.TestCase):
         am2 = ApprovalManager(ctx2)
         self.assertTrue(am2.auto_allowed("email_reply", {}))
         self.assertFalse(am2.auto_allowed("social_post", {}))
+        ctx3 = make_ctx(auto_publish_social=True, ceo_approval_required=False)
+        self.assertTrue(ApprovalManager(ctx3).auto_allowed("social_post", {}))
 
     def test_ad_campaign_never_claims_live(self) -> None:
         ctx = make_ctx()
