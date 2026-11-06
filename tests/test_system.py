@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import tempfile
+import sqlite3
 import threading
 import unittest
 import urllib.error
@@ -28,6 +29,7 @@ from dayluxe.integrations.gmail import InboundEmail
 from dayluxe.storage import Storage
 
 TOKEN = "test-admin-token-1234567890"
+APPROVAL_TOKEN = "test-sensitive-approval-token-123456"
 SECRET = "test-webhook-secret"
 
 
@@ -55,7 +57,7 @@ class FakeNet:
 
 
 def make_ctx(net: FakeNet | None = None, **overrides: Any) -> Context:
-    s = Settings(admin_token=TOKEN, webhook_secret=SECRET, database_path=":memory:", business_phone="0402 749 443",
+    s = Settings(admin_token=TOKEN, approval_token=APPROVAL_TOKEN, webhook_secret=SECRET, database_path=":memory:", business_phone="0402 749 443",
                  email_signature="Azher – Dayluxe Roofing", text_provider="none")
     for k, v in overrides.items():
         setattr(s, k, v)
@@ -243,7 +245,7 @@ class IntakeAndApprovalTests(unittest.TestCase):
         ctx = make_ctx(auto_send_email=True, auto_publish_social=True)  # CEO approval still required for email
         am = ApprovalManager(ctx)
         self.assertFalse(am.auto_allowed("email_reply", {}))
-        self.assertTrue(am.auto_allowed("social_post", {}))
+        self.assertFalse(am.auto_allowed("social_post", {}))  # global owner-approval lock wins
         self.assertFalse(am.auto_allowed("ad_campaign", {}))
         self.assertFalse(am.auto_allowed("outreach_email", {}))
         self.assertFalse(am.auto_allowed("seo_page_publish", {}))
@@ -251,6 +253,8 @@ class IntakeAndApprovalTests(unittest.TestCase):
         am2 = ApprovalManager(ctx2)
         self.assertTrue(am2.auto_allowed("email_reply", {}))
         self.assertFalse(am2.auto_allowed("social_post", {}))
+        ctx3 = make_ctx(auto_publish_social=True, ceo_approval_required=False)
+        self.assertTrue(ApprovalManager(ctx3).auto_allowed("social_post", {}))
 
     def test_ad_campaign_never_claims_live(self) -> None:
         ctx = make_ctx()
@@ -260,6 +264,21 @@ class IntakeAndApprovalTests(unittest.TestCase):
         res = am.decide(ad["id"], True, "owner")
         self.assertIn("NOT launched", res["result"])
         self.assertEqual(ctx.storage.get_approval(ad["id"])["status"], "approved")
+
+    def test_backup_snapshot_can_be_restored(self) -> None:
+        source = Storage(":memory:")
+        lead_id, _ = source.upsert_lead({"name": "Backup Test", "email": "backup@example.com"},
+                                        {"source": "test", "external_id": "backup-1"})
+        payload = source.backup_bytes()
+        self.assertTrue(payload.startswith(b"SQLite format 3"))
+        restored = sqlite3.connect(":memory:")
+        try:
+            restored.deserialize(payload)
+            row = restored.execute("SELECT name,email FROM leads WHERE id=?", (lead_id,)).fetchone()
+            self.assertEqual(row, ("Backup Test", "backup@example.com"))
+        finally:
+            restored.close()
+            source.close()
 
 
 class QuoteTests(unittest.TestCase):
@@ -458,15 +477,17 @@ class WebTests(unittest.TestCase):
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect)
         try:
             with opener.open(r, timeout=10) as resp:
-                return resp.status, resp.read().decode(), dict(resp.headers)
+                return resp.status, resp.read().decode(errors="replace"), dict(resp.headers)
         except urllib.error.HTTPError as e:
-            return e.code, e.read().decode(), dict(e.headers)
+            return e.code, e.read().decode(errors="replace"), dict(e.headers)
 
     def test_flow(self) -> None:
         auth = {"Authorization": f"Bearer {TOKEN}"}
         self.assertEqual(self.req("GET", "/health")[0], 200)
-        self.assertEqual(self.req("GET", "/api/status")[0], 401)
-        self.assertEqual(self.req("GET", "/")[0], 303)
+        self.assertEqual(self.req("GET", "/api/status")[0], 403)
+        code, page, _ = self.req("GET", "/")
+        self.assertEqual(code, 200)
+        self.assertIn("Owner access code", page)
         self.assertEqual(self.req("POST", "/webhook/lead", {"email": "a@b.com", "message": "roof"})[0], 401)
         code, body, _ = self.req("POST", "/webhook/lead",
                                  {"name": "Lee", "email": "lee@ex.com", "message": "roof restoration Blacktown"},
@@ -477,18 +498,26 @@ class WebTests(unittest.TestCase):
         self.assertEqual(code, 422)
         code, body, _ = self.req("GET", "/api/status", headers=auth)
         self.assertEqual(code, 200)
+        backup_code, backup_body, backup_headers = self.req("GET", "/api/backup", headers=auth)
+        self.assertEqual(backup_code, 200)
+        self.assertTrue(backup_body.startswith("SQLite format 3"))
+        self.assertIn("dayluxe-backup.sqlite3", backup_headers.get("Content-Disposition", ""))
         status = json.loads(body)
         self.assertEqual(status["counts"]["leads_new"], 1)
         self.assertNotIn(TOKEN, body)
         aid = status["pending_approvals"][0]["id"]
-        code, body, _ = self.req("POST", f"/api/approvals/{aid}/reject", {}, auth)
+        code, body, _ = self.req("POST", f"/api/approvals/{aid}/reject", {"approval_token": APPROVAL_TOKEN}, auth)
         self.assertEqual((code, json.loads(body)["status"]), (200, "rejected"))
-        code, body, _ = self.req("POST", f"/api/approvals/{aid}/approve", {}, auth)
+        code, body, _ = self.req("POST", f"/api/approvals/{aid}/approve", {"approval_token": APPROVAL_TOKEN}, auth)
         self.assertEqual(code, 409)
+        # The owner access token cannot approve a sensitive action by itself.
+        code, _, _ = self.req("POST", "/unlock", {"token": TOKEN}, form=True)
+        self.assertEqual(code, 303)
         # cookie login + dashboard render
         code, _, hdrs = self.req("POST", "/login", {"token": TOKEN}, form=True)
         self.assertEqual(code, 303)
         cookie = hdrs["Set-Cookie"].split(";")[0]
+        self.assertTrue(cookie.startswith("dlx_owner="))
         code, page, _ = self.req("GET", "/", headers={"Cookie": cookie})
         self.assertEqual(code, 200)
         self.assertIn("Dayluxe AI CEO", page)

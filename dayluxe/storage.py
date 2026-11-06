@@ -166,6 +166,16 @@ class Storage:
         except sqlite3.Error:
             return False
 
+    def backup_bytes(self) -> bytes:
+        """Return a consistent SQLite snapshot suitable for an owner-only download."""
+        with self._lock:
+            snapshot = sqlite3.connect(":memory:")
+            try:
+                self._conn.backup(snapshot)
+                return snapshot.serialize()
+            finally:
+                snapshot.close()
+
     # ----------------------------------------------------------------- leads
     def enquiry_exists(self, source: str, external_id: str) -> bool:
         with self.tx() as c:
