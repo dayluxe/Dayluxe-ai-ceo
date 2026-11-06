@@ -28,6 +28,7 @@ from dayluxe.integrations.gmail import InboundEmail
 from dayluxe.storage import Storage
 
 TOKEN = "test-admin-token-1234567890"
+APPROVAL_TOKEN = "test-sensitive-approval-token-123456"
 SECRET = "test-webhook-secret"
 
 
@@ -55,7 +56,7 @@ class FakeNet:
 
 
 def make_ctx(net: FakeNet | None = None, **overrides: Any) -> Context:
-    s = Settings(admin_token=TOKEN, webhook_secret=SECRET, database_path=":memory:", business_phone="0402 749 443",
+    s = Settings(admin_token=TOKEN, approval_token=APPROVAL_TOKEN, webhook_secret=SECRET, database_path=":memory:", business_phone="0402 749 443",
                  email_signature="Azher – Dayluxe Roofing", text_provider="none")
     for k, v in overrides.items():
         setattr(s, k, v)
@@ -465,8 +466,10 @@ class WebTests(unittest.TestCase):
     def test_flow(self) -> None:
         auth = {"Authorization": f"Bearer {TOKEN}"}
         self.assertEqual(self.req("GET", "/health")[0], 200)
-        self.assertEqual(self.req("GET", "/api/status")[0], 401)
-        self.assertEqual(self.req("GET", "/")[0], 303)
+        self.assertEqual(self.req("GET", "/api/status")[0], 403)
+        code, page, _ = self.req("GET", "/")
+        self.assertEqual(code, 200)
+        self.assertIn("Owner access code", page)
         self.assertEqual(self.req("POST", "/webhook/lead", {"email": "a@b.com", "message": "roof"})[0], 401)
         code, body, _ = self.req("POST", "/webhook/lead",
                                  {"name": "Lee", "email": "lee@ex.com", "message": "roof restoration Blacktown"},
@@ -481,14 +484,18 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status["counts"]["leads_new"], 1)
         self.assertNotIn(TOKEN, body)
         aid = status["pending_approvals"][0]["id"]
-        code, body, _ = self.req("POST", f"/api/approvals/{aid}/reject", {}, auth)
+        code, body, _ = self.req("POST", f"/api/approvals/{aid}/reject", {"approval_token": APPROVAL_TOKEN}, auth)
         self.assertEqual((code, json.loads(body)["status"]), (200, "rejected"))
-        code, body, _ = self.req("POST", f"/api/approvals/{aid}/approve", {}, auth)
+        code, body, _ = self.req("POST", f"/api/approvals/{aid}/approve", {"approval_token": APPROVAL_TOKEN}, auth)
         self.assertEqual(code, 409)
+        # The owner access token cannot approve a sensitive action by itself.
+        code, _, _ = self.req("POST", "/unlock", {"token": TOKEN}, form=True)
+        self.assertEqual(code, 303)
         # cookie login + dashboard render
         code, _, hdrs = self.req("POST", "/login", {"token": TOKEN}, form=True)
         self.assertEqual(code, 303)
         cookie = hdrs["Set-Cookie"].split(";")[0]
+        self.assertTrue(cookie.startswith("dlx_owner="))
         code, page, _ = self.req("GET", "/", headers={"Cookie": cookie})
         self.assertEqual(code, 200)
         self.assertIn("Dayluxe AI CEO", page)
