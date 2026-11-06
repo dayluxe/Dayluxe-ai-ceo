@@ -204,6 +204,10 @@ class Handler(BaseHTTPRequestHandler):
         st = self.app.ctx.storage
         if path == "/":
             return self.html_page(200, dashboard_page(self.app, self.owner_view()))
+        if path == "/api/backup":
+            snapshot = st.backup_bytes()
+            return self._send(200, snapshot, "application/vnd.sqlite3",
+                              {"Content-Disposition": 'attachment; filename="dayluxe-backup.sqlite3"'})
         if path == "/api/status":
             return self.json(200, {"health": self.app.ceo.health(max_age=60), **self.app.ceo.dashboard_data(),
                                    "last_run": st.last_run(), "settings": self.app.ctx.settings.redacted()})
