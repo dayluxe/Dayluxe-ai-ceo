@@ -64,6 +64,7 @@ def _str(name: str, default: str = "") -> str:
 
 SECRET_FIELDS = {
     "admin_token",
+    "approval_token",
     "webhook_secret",
     "openai_api_key",
     "gemini_api_key",
@@ -86,6 +87,7 @@ class Settings:
 
     # Security
     admin_token: str = ""
+    approval_token: str = ""
     webhook_secret: str = ""
 
     # Storage
@@ -169,8 +171,8 @@ class Settings:
     def validate(self) -> list[str]:
         """Return a list of configuration problems (empty list = OK)."""
         problems: list[str] = []
-        if not self.admin_token or len(self.admin_token) < 16:
-            problems.append("ADMIN_TOKEN is missing or shorter than 16 characters (dashboard is locked).")
+        if not self.approval_token or len(self.approval_token) < 24:
+            problems.append("APPROVAL_TOKEN is missing or shorter than 24 characters (owner approvals are disabled).")
         if self.text_provider not in {"auto", "openai", "gemini", "none"}:
             problems.append("TEXT_PROVIDER must be one of auto, openai, gemini, none.")
         if self.text_provider == "openai" and not self.openai_configured:
@@ -226,6 +228,7 @@ def load_settings(env_file: str | None = ".env") -> Settings:
         email_signature=_str("EMAIL_SIGNATURE", Settings.email_signature).replace("\\n", "\n"),
         timezone=_str("TIMEZONE", Settings.timezone),
         admin_token=_str("ADMIN_TOKEN"),
+        approval_token=_str("APPROVAL_TOKEN"),
         webhook_secret=_str("WEBHOOK_SECRET"),
         database_path=_str("DATABASE_PATH", Settings.database_path),
         auto_send_email=_bool("AUTO_SEND_EMAIL", False),
