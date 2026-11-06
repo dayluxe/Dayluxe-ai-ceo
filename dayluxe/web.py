@@ -243,6 +243,9 @@ class Handler(BaseHTTPRequestHandler):
                 cookie += "; Secure"
             return self.redirect("/", {"Set-Cookie": cookie})
 
+        if path in ("/api/media/upload", "/api/media/publish-best") and not self.owner_view():
+            return self.json(403, {"error": "Owner unlock required. No action was taken."})
+
         if path == "/api/media/upload":
             data = self.read_body()
             filename = str(data.get("filename", ""))
