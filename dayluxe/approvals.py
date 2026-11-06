@@ -44,12 +44,12 @@ class ApprovalManager:
     # ------------------------------------------------------------- policy
     def auto_allowed(self, kind: str, payload: dict[str, Any]) -> bool:
         s = self.ctx.settings
-        # Social autopublishing is an explicit, independent opt-in. Other action
-        # types still require CEO_APPROVAL_REQUIRED=false plus their own AUTO_* switch.
-        if kind == "social_post":
-            return s.auto_publish_social
+        # A global approval lock always wins, including social publishing.
+        # Per-action AUTO_* switches only apply after the owner disables this lock.
         if s.ceo_approval_required:
             return False
+        if kind == "social_post":
+            return s.auto_publish_social and not payload.get("sensitive")
         if kind in ("email_reply", "followup"):
             return s.auto_send_email and not payload.get("sensitive")
         if kind == "quote":
@@ -175,19 +175,24 @@ class ApprovalManager:
         if not meta.configured:
             raise ApprovalError("Facebook/Instagram is not connected — post it manually")
         message = p["message"]
-        image_url = self.ctx.images.public_url(p.get("image_file", ""))
+        media_file = p.get("image_file", "")
+        media_url = self.ctx.images.public_url(media_file)
         done: list[str] = []
-        fb_id = meta.publish_facebook(message, image_url)
-        done.append(f"Facebook post {fb_id}")
+        if media_file.lower().endswith((".mp4", ".mov")):
+            fb_id = meta.publish_facebook_video(message, media_url)
+            done.append(f"Facebook video {fb_id}")
+        else:
+            fb_id = meta.publish_facebook(message, media_url)
+            done.append(f"Facebook post {fb_id}")
         ig_note = ""
         if self.ctx.settings.meta_ig_user_id:
-            if image_url:
+            if media_url and not media_file.lower().endswith((".mp4", ".mov")):
                 try:
-                    done.append(f"Instagram media {meta.publish_instagram(message, image_url)}")
+                    done.append(f"Instagram media {meta.publish_instagram(message, media_url)}")
                 except HttpError as exc:
                     ig_note = f"; Instagram failed: {exc}"
             else:
-                ig_note = "; Instagram skipped (needs an image with a public URL)"
+                ig_note = "; Instagram skipped (video publishing not enabled here)"
         if p.get("content_id"):
             self.ctx.storage.update_content(int(p["content_id"]), "published", fb_id)
         return ", ".join(done) + ig_note
