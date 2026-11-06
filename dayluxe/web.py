@@ -120,10 +120,15 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def owner_view(self) -> bool:
-        cookie = SimpleCookie(self.headers.get("Cookie", ""))
-        token = cookie["dlx_owner"].value if "dlx_owner" in cookie else ""
-        expected = self.app.ctx.settings.approval_token
-        return bool(expected and len(expected) >= 24 and
+        # Dashboard access uses ADMIN_TOKEN; action approval remains separately
+        # gated by APPROVAL_TOKEN in the approval route below.
+        auth = self.headers.get("Authorization", "")
+        token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+        if not token:
+            cookie = SimpleCookie(self.headers.get("Cookie", ""))
+            token = cookie["dlx_owner"].value if "dlx_owner" in cookie else ""
+        expected = self.app.ctx.settings.admin_token
+        return bool(expected and len(expected) >= 16 and
                     hmac.compare_digest(token.encode(), expected.encode()))
 
     def same_origin(self) -> bool:
@@ -232,14 +237,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/unlock":
             data = self.read_body()
-            token = str(data.get("approval_token", ""))
-            expected = app.ctx.settings.approval_token
-            if not expected or len(expected) < 24 or not hmac.compare_digest(token.encode(), expected.encode()):
+            token = str(data.get("token", ""))
+            if not app.check_token(token):
                 time.sleep(1)
                 return self.html_page(401, dashboard_page(app, False).replace(
-                    "Owner unlock code", "Incorrect code — try again"))
+                    "Owner access code", "Incorrect code — try again"))
             cookie = f"dlx_owner={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200"
-            if self.headers.get("X-Forwarded-Proto", "") == "https":
+            if self.headers.get("X-Forwarded-Proto", "").split(",", 1)[0].strip().lower() == "https":
                 cookie += "; Secure"
             return self.redirect("/", {"Set-Cookie": cookie})
 
@@ -439,7 +443,7 @@ def dashboard_page(app: App, owner: bool = False) -> str:
 <p>اللوحة تفتح مباشرة، لكن بيانات الزبائن والطلبات مخفية لحمايتها.</p>
 <p class='mute'>للوصول إلى التفاصيل وأدوات الإدارة، افتحها برمز المالك الخاص. هذا ليس تسجيل دخول بكلمة مرور.</p>
 <form method='post' action='/unlock'>
-<label>Owner unlock code<input type='password' name='approval_token' minlength='24' autocomplete='off' required></label>
+<label>Owner access code<input type='password' name='token' minlength='16' autocomplete='current-password' required></label>
 <div class='row'><input type='submit' value='Unlock private dashboard'></div></form>
 </div>"""
         return layout("Dayluxe AI CEO", body)
