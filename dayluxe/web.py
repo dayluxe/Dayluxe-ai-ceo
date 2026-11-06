@@ -116,9 +116,15 @@ class Handler(BaseHTTPRequestHandler):
         return cookie[COOKIE].value if COOKIE in cookie else ""
 
     def authed(self) -> bool:
-        # PUBLIC DASHBOARD MODE: no login required. Anyone with the URL can access
-        # dashboard data and controls; enable only when the owner explicitly requests it.
+        # The dashboard shell is public; private data and controls require owner unlock.
         return True
+
+    def owner_view(self) -> bool:
+        cookie = SimpleCookie(self.headers.get("Cookie", ""))
+        token = cookie["dlx_owner"].value if "dlx_owner" in cookie else ""
+        expected = self.app.ctx.settings.approval_token
+        return bool(expected and len(expected) >= 24 and
+                    hmac.compare_digest(token.encode(), expected.encode()))
 
     def same_origin(self) -> bool:
         origin = self.headers.get("Origin")
@@ -179,8 +185,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.json(404, {"error": "not found"})
         if path == "/login":
             return self.html_page(200, login_page())
-        if path == "/logout":
-            return self.redirect("/login", {"Set-Cookie": f"{COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"})
+        if path == "/logout" or path == "/lock":
+            return self.redirect("/", {"Set-Cookie": "dlx_owner=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure"})
+        if path.startswith("/api/") and not self.owner_view():
+            return self.json(403, {"error": "Owner unlock required to view private business data."})
         if not self.authed():
             if path.startswith("/api/"):
                 return self.json(401, {"error": "unauthorized"})
@@ -190,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
 
         st = self.app.ctx.storage
         if path == "/":
-            return self.html_page(200, dashboard_page(self.app))
+            return self.html_page(200, dashboard_page(self.app, self.owner_view()))
         if path == "/api/status":
             return self.json(200, {"health": self.app.ceo.health(max_age=60), **self.app.ceo.dashboard_data(),
                                    "last_run": st.last_run(), "settings": self.app.ctx.settings.redacted()})
@@ -222,6 +230,18 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path.rstrip("/")
         app = self.app
 
+        if path == "/unlock":
+            data = self.read_body()
+            token = str(data.get("approval_token", ""))
+            expected = app.ctx.settings.approval_token
+            if not expected or len(expected) < 24 or not hmac.compare_digest(token.encode(), expected.encode()):
+                time.sleep(1)
+                return self.html_page(401, dashboard_page(app, False).replace(
+                    "Owner unlock code", "Incorrect code — try again"))
+            cookie = f"dlx_owner={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200"
+            if self.headers.get("X-Forwarded-Proto", "") == "https":
+                cookie += "; Secure"
+            return self.redirect("/", {"Set-Cookie": cookie})
 
         if path == "/api/media/upload":
             data = self.read_body()
@@ -297,6 +317,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.redirect("/", {"Set-Cookie": cookie})
             time.sleep(1)  # slow down guessing
             return self.html_page(401, login_page("Wrong token"))
+
+        if not self.owner_view():
+            return self.json(403, {"error": "Owner unlock required. No action was taken."})
 
         if not self.authed():
             return self.json(401, {"error": "unauthorized"})
@@ -406,7 +429,18 @@ def login_page(error: str = "") -> str:
 <div class='row'><input type='submit' value='Sign in'></div></form></div>""")
 
 
-def dashboard_page(app: App) -> str:
+def dashboard_page(app: App, owner: bool = False) -> str:
+    if not owner:
+        body = """<div class='card' style='max-width:520px;margin:48px auto'>
+<h1>Dayluxe AI CEO</h1>
+<p>اللوحة تفتح مباشرة، لكن بيانات الزبائن والطلبات مخفية لحمايتها.</p>
+<p class='mute'>للوصول إلى التفاصيل وأدوات الإدارة، افتحها برمز المالك الخاص. هذا ليس تسجيل دخول بكلمة مرور.</p>
+<form method='post' action='/unlock'>
+<label>Owner unlock code<input type='password' name='approval_token' minlength='24' autocomplete='off' required></label>
+<div class='row'><input type='submit' value='Unlock private dashboard'></div></form>
+</div>"""
+        return layout("Dayluxe AI CEO", body)
+
     st = app.ctx.storage
     ceo = app.ceo
     health = ceo.health(max_age=120)
@@ -466,7 +500,7 @@ def dashboard_page(app: App) -> str:
     media_ui = "<div class='card' id='media-studio'><h2>Media studio — الصور والفيديو والصوت</h2>\n<p class='mute'>ارفع صور وفيديوهات شغل Dayluxe. الاختيار الحالي تقني حسب نوع الملف وحجمه وحداثته، وليس تحليلاً بصرياً كاملاً.</p>\n<label>اختيار صور أو فيديوهات<input id='media-files' type='file' accept='image/png,image/jpeg,image/webp,video/mp4,video/quicktime' multiple></label>\n<div class='row'><button type='button' id='upload-media'>رفع الملفات</button></div><p id='upload-status' class='mute' aria-live='polite'></p>\n<label>نص المنشور<textarea id='media-caption' placeholder='اكتب نص المنشور أو استخدم الميكروفون...'></textarea></label>\n<div class='row'><button type='button' id='voice-caption'>🎙️ احچي المنشور</button><button type='button' id='publish-best'>اختيار الأفضل ونشره على Facebook</button></div>\n<p class='mute' id='voice-status'>الميكروفون يحتاج إذن المتصفح ويدعم Chrome غالباً.</p></div>\n<script>\n(function(){\n const files=document.getElementById('media-files'), status=document.getElementById('upload-status');\n document.getElementById('upload-media').addEventListener('click',async()=>{\n  if(!files.files.length){status.textContent='اختار صورة أو فيديو أولاً.';return;}\n  for(const file of files.files){\n   if(file.size>30000000){status.textContent=file.name+': أكبر من 30 MB.';continue;}\n   status.textContent='جاري رفع '+file.name+'...';\n   const b64=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result).split(',')[1]);r.onerror=reject;r.readAsDataURL(file);});\n   try{const res=await fetch('/api/media/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file.name,mime:file.type||'application/octet-stream',data:b64})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل الرفع');status.textContent='تم رفع '+file.name+' بنجاح.';}\n   catch(e){status.textContent='تعذر رفع '+file.name+': '+e.message;}\n  }\n });\n document.getElementById('voice-caption').addEventListener('click',()=>{\n  const SR=window.SpeechRecognition||window.webkitSpeechRecognition, msg=document.getElementById('voice-status');\n  if(!SR){msg.textContent='المتصفح لا يدعم الصوت إلى نص؛ جرّب Chrome على Android.';return;}\n  const rec=new SR();rec.lang='ar-IQ';rec.interimResults=false;rec.maxAlternatives=1;msg.textContent='احچي هسه...';\n  rec.onresult=e=>{const box=document.getElementById('media-caption');box.value+=(box.value?' ':'')+e.results[0][0].transcript;msg.textContent='تم تحويل كلامك إلى نص.';};\n  rec.onerror=e=>msg.textContent='تعذر استخدام الميكروفون: '+e.error;rec.start();\n });\n document.getElementById('publish-best').addEventListener('click',async()=>{\n  const msg=document.getElementById('voice-status'), caption=document.getElementById('media-caption').value.trim();\n  if(!caption){msg.textContent='اكتب أو املي نص المنشور أولاً.';return;}msg.textContent='جاري اختيار الملف ومحاولة النشر...';\n  try{const res=await fetch('/api/media/publish-best',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({caption})});const d=await res.json();if(!res.ok)throw new Error(d.error||'فشل إرسال طلب الموافقة');msg.textContent='تم إرسال المنشور إلى قائمة الموافقات. رقم الطلب: #'+d.approval_id+'. لم يتم النشر بعد.';}\n  catch(e){msg.textContent=e.message;}\n });\n})();\n</script>"
 
     body = f"""<header><h1>Dayluxe AI CEO</h1><div class='row'><form method='post' action='/ui/run'>
-<input type='submit' value='Run cycle now'></form><a href='/logout' class='mute'>Log out</a></div></header>
+<input type='submit' value='Run cycle now'></form><a href='/lock' class='mute'>Lock private data</a></div></header>
 {{MSG}}<p class='mute'>{last_txt}</p>
 {f"<div class='card'><b>Configuration warnings</b><ul>{warn}</ul></div>" if warn else ''}
 <div class='grid'>{kpis}</div>
