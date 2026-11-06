@@ -265,14 +265,16 @@ class Handler(BaseHTTPRequestHandler):
             if not app.ctx.settings.public_base_url:
                 return self.json(503, {"error": "Set PUBLIC_BASE_URL in Render before publishing media."})
             media_url = app.ctx.settings.public_base_url.rstrip("/") + "/media/" + best.name
-            if best.suffix.lower() in (".mp4", ".mov"):
-                post_id = app.ctx.meta.publish_facebook_video(caption, media_url)
-                platform = "Facebook video"
-            else:
-                post_id = app.ctx.meta.publish_facebook(caption, media_url)
-                platform = "Facebook photo"
-            app.ctx.storage.log_action("media", "publish selected media", "completed", f"{platform}; asset={best.name}; post={post_id}")
-            return self.json(200, {"ok": True, "platform": platform, "filename": best.name, "post_id": post_id})
+            # Queue the post for owner approval; never publish directly from Media Studio.
+            approval = app.ceo.approvals.propose(
+                "social_post",
+                f"Facebook post from Media Studio ({best.name})",
+                {"message": caption, "image_file": best.name},
+                f"media-publish:{best.name}:{__import__('hashlib').sha256(caption.encode()).hexdigest()[:12]}",
+            )
+            return self.json(202, {"ok": True, "status": approval.get("status"),
+                                   "approval_id": approval.get("id"), "filename": best.name,
+                                   "message": "Queued for owner approval. Nothing has been published yet."})
 
         if path == "/webhook/lead":
             secret = self.headers.get("X-Webhook-Secret", "")
@@ -320,6 +322,12 @@ class Handler(BaseHTTPRequestHandler):
         if m and m.group(2):
             approval_id, decision = int(m.group(1)), m.group(2)
             data = self.read_body()
+            approval_token = str(data.get("approval_token") or self.headers.get("X-Approval-Token", ""))
+            expected = app.ctx.settings.approval_token
+            if not expected or len(expected) < 24 or not hmac.compare_digest(approval_token.encode(), expected.encode()):
+                if path.startswith("/ui"):
+                    return self.redirect("/?msg=" + urllib.parse.quote("Owner approval code required or incorrect. No action was taken."))
+                return self.json(403, {"error": "Valid owner approval code required. No action was taken."})
             edits = data.get("edits") if isinstance(data.get("edits"), dict) else {
                 k: data[k] for k in ("subject", "body", "message") if k in data}
             try:
@@ -436,7 +444,8 @@ def dashboard_page(app: App) -> str:
         approvals_html.append(f"""<div class='card'><b>#{a['id']} · {esc(KINDS.get(a['kind'], a['kind']))}</b>
 <div>{esc(a['title'])}</div>{f"<p class='ar'>{esc(summary_ar)}</p>" if summary_ar else ''}{details}
 <form method='post' action='/ui/approvals/{a['id']}/approve'>{body}
-<div class='row'><input type='submit' value='Approve{' & send' if a['kind'] in ('email_reply','followup','quote','outreach_email') else ''}'>
+<label>Owner approval code <input type='password' name='approval_token' minlength='24' autocomplete='off' required placeholder='Enter your private approval code'></label>
+<div class='row'><input type='submit' value='Approve{' & send' if a['kind'] in ('email_reply','followup','quote','outreach_email') else ''}>
 <button class='secondary' formaction='/ui/approvals/{a['id']}/reject'>Reject</button></div></form></div>""")
 
     lead_rows = "".join(
