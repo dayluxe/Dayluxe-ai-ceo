@@ -18,6 +18,7 @@ from typing import Any
 from dayluxe.agents import sales
 from dayluxe.agents.email_agent import EmailAgent, classify
 from dayluxe.agents.intake import IntakeError, intake_web_form
+from dayluxe.agents.channel_messages import intake_message
 from dayluxe.agents.marketing import MarketingAgent
 from dayluxe.agents.quote import QuoteAgent, build_quote
 from dayluxe.approvals import ApprovalError, ApprovalManager
@@ -292,6 +293,43 @@ class IntakeAndApprovalTests(unittest.TestCase):
         finally:
             restored.close()
             source.close()
+
+
+class ChannelMessageTests(unittest.TestCase):
+    def test_facebook_message_creates_crm_lead_and_review_draft(self) -> None:
+        ctx = make_ctx()
+        am = ApprovalManager(ctx)
+        args = dict(channel="facebook", message_id="fb-msg-1", sender_id="psid-123",
+                    text="Roof leak in Liverpool, can you inspect?", name="Sam")
+        first = intake_message(ctx, am, **args)
+        self.assertEqual(first["status"], "ok")
+        self.assertTrue(first["new_lead"])
+        self.assertEqual(first["reply"], "owner_review")
+        self.assertEqual(len(ctx.storage.list_leads()), 1)
+        pending = ctx.storage.list_approvals("pending")
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["kind"], "owner_attention")
+        self.assertIn("reply_draft", pending[0]["payload"])
+        self.assertEqual(intake_message(ctx, am, **args)["status"], "duplicate")
+        self.assertEqual(len(ctx.storage.list_approvals("pending")), 1)
+
+    def test_sensitive_channel_message_never_autoreplies(self) -> None:
+        ctx = make_ctx(ceo_approval_required=False, auto_send_email=True)
+        result = intake_message(ctx, ApprovalManager(ctx), channel="instagram",
+                                message_id="ig-1", sender_id="ig-user-1",
+                                text="I want a refund, your roof repair is leaking")
+        self.assertIn("escalation", result)
+        self.assertEqual(ctx.storage.list_approvals("pending")[0]["kind"], "owner_attention")
+
+    def test_invalid_and_unauthenticated_channel_inputs_rejected(self) -> None:
+        ctx = make_ctx()
+        am = ApprovalManager(ctx)
+        with self.assertRaises(ValueError):
+            intake_message(ctx, am, channel="unknown", message_id="1", sender_id="s", text="roof")
+        with self.assertRaises(ValueError):
+            intake_message(ctx, am, channel="facebook", message_id="1", text="roof")
+        with self.assertRaises(ValueError):
+            intake_message(ctx, am, channel="facebook", message_id="1", sender_id="s", text=" ")
 
 
 class QuoteTests(unittest.TestCase):
