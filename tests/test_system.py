@@ -18,6 +18,7 @@ from typing import Any
 from dayluxe.agents import sales
 from dayluxe.agents.email_agent import EmailAgent, classify
 from dayluxe.agents.intake import IntakeError, intake_web_form
+from dayluxe.agents.channel_messages import intake_message
 from dayluxe.agents.marketing import MarketingAgent
 from dayluxe.agents.quote import QuoteAgent, build_quote
 from dayluxe.approvals import ApprovalError, ApprovalManager
@@ -256,6 +257,19 @@ class IntakeAndApprovalTests(unittest.TestCase):
         ctx3 = make_ctx(auto_publish_social=True, ceo_approval_required=False)
         self.assertTrue(ApprovalManager(ctx3).auto_allowed("social_post", {}))
 
+    def test_quotes_never_autosend_even_when_all_switches_enabled(self) -> None:
+        ctx = make_ctx(auto_send_quotes=True, ceo_approval_required=False)
+        manager = ApprovalManager(ctx)
+        self.assertFalse(manager.auto_allowed("quote", {"missing": []}))
+        self.assertFalse(manager.auto_allowed("quote", {"missing": [], "sensitive": False}))
+        result = manager.propose(
+            "quote", "Roof restoration quotation",
+            {"to": "customer@example.com", "subject": "Quotation", "body": "Owner-priced scope", "missing": []},
+            "quote-owner-approval-1",
+        )
+        self.assertEqual(result["status"], "approval_required")
+        self.assertEqual(ctx.storage.list_approvals("pending")[0]["kind"], "quote")
+
     def test_ad_campaign_never_claims_live(self) -> None:
         ctx = make_ctx()
         am = ApprovalManager(ctx)
@@ -279,6 +293,75 @@ class IntakeAndApprovalTests(unittest.TestCase):
         finally:
             restored.close()
             source.close()
+
+
+class ChannelMessageTests(unittest.TestCase):
+    def test_facebook_message_creates_crm_lead_and_review_draft(self) -> None:
+        ctx = make_ctx()
+        am = ApprovalManager(ctx)
+        args = dict(channel="facebook", message_id="fb-msg-1", sender_id="psid-123",
+                    text="Roof leak in Liverpool, can you inspect?", name="Sam")
+        first = intake_message(ctx, am, **args)
+        self.assertEqual(first["status"], "ok")
+        self.assertTrue(first["new_lead"])
+        self.assertEqual(first["reply"], "owner_review")
+        self.assertEqual(len(ctx.storage.list_leads()), 1)
+        pending = ctx.storage.list_approvals("pending")
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["kind"], "owner_attention")
+        self.assertIn("reply_draft", pending[0]["payload"])
+        self.assertEqual(intake_message(ctx, am, **args)["status"], "duplicate")
+        self.assertEqual(len(ctx.storage.list_approvals("pending")), 1)
+
+    def test_all_supported_channels_create_reviewable_leads(self) -> None:
+        for channel in ("facebook", "instagram", "whatsapp", "sms", "website_chat"):
+            with self.subTest(channel=channel):
+                ctx = make_ctx(ceo_approval_required=False, auto_send_email=True)
+                am = ApprovalManager(ctx)
+                result = intake_message(
+                    ctx, am, channel=channel, message_id=channel + "-1",
+                    sender_id="sender-" + channel,
+                    text="Urgent roof leak at Liverpool. Please call 0411 222 333",
+                    name="Taylor",
+                )
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["reply"], "owner_review")
+                lead = ctx.storage.get_lead(result["lead_id"])
+                self.assertEqual(lead["suburb"], "Liverpool")
+                self.assertEqual(lead["service"], "Roof repairs")
+                self.assertEqual(lead["urgency"], "urgent")
+                self.assertEqual(lead["phone"], "0411222333")
+                self.assertEqual(len(ctx.storage.list_approvals("pending")), 1)
+                self.assertEqual(ctx.storage.list_approvals("pending")[0]["kind"], "owner_attention")
+
+    def test_same_customer_multiple_messages_link_to_existing_lead(self) -> None:
+        ctx = make_ctx()
+        am = ApprovalManager(ctx)
+        first = intake_message(ctx, am, channel="sms", message_id="sms-1",
+                               phone="0411 222 333", text="Need gutter cleaning in Penrith")
+        second = intake_message(ctx, am, channel="sms", message_id="sms-2",
+                                phone="+61 411 222 333", text="Can I send photos?")
+        self.assertEqual(first["lead_id"], second["lead_id"])
+        self.assertFalse(second["new_lead"])
+        self.assertEqual(len(ctx.storage.lead_enquiries(first["lead_id"])), 2)
+
+    def test_sensitive_channel_message_never_autoreplies(self) -> None:
+        ctx = make_ctx(ceo_approval_required=False, auto_send_email=True)
+        result = intake_message(ctx, ApprovalManager(ctx), channel="instagram",
+                                message_id="ig-1", sender_id="ig-user-1",
+                                text="I want a refund, your roof repair is leaking")
+        self.assertIn("escalation", result)
+        self.assertEqual(ctx.storage.list_approvals("pending")[0]["kind"], "owner_attention")
+
+    def test_invalid_and_unauthenticated_channel_inputs_rejected(self) -> None:
+        ctx = make_ctx()
+        am = ApprovalManager(ctx)
+        with self.assertRaises(ValueError):
+            intake_message(ctx, am, channel="unknown", message_id="1", sender_id="s", text="roof")
+        with self.assertRaises(ValueError):
+            intake_message(ctx, am, channel="facebook", message_id="1", text="roof")
+        with self.assertRaises(ValueError):
+            intake_message(ctx, am, channel="facebook", message_id="1", sender_id="s", text=" ")
 
 
 class QuoteTests(unittest.TestCase):
