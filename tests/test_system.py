@@ -313,6 +313,38 @@ class ChannelMessageTests(unittest.TestCase):
         self.assertEqual(intake_message(ctx, am, **args)["status"], "duplicate")
         self.assertEqual(len(ctx.storage.list_approvals("pending")), 1)
 
+    def test_all_supported_channels_create_reviewable_leads(self) -> None:
+        for channel in ("facebook", "instagram", "whatsapp", "sms", "website_chat"):
+            with self.subTest(channel=channel):
+                ctx = make_ctx(ceo_approval_required=False, auto_send_email=True)
+                am = ApprovalManager(ctx)
+                result = intake_message(
+                    ctx, am, channel=channel, message_id=channel + "-1",
+                    sender_id="sender-" + channel,
+                    text="Urgent roof leak at Liverpool. Please call 0411 222 333",
+                    name="Taylor",
+                )
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(result["reply"], "owner_review")
+                lead = ctx.storage.get_lead(result["lead_id"])
+                self.assertEqual(lead["suburb"], "Liverpool")
+                self.assertEqual(lead["service"], "Roof repairs")
+                self.assertEqual(lead["urgency"], "urgent")
+                self.assertEqual(lead["phone"], "0411222333")
+                self.assertEqual(len(ctx.storage.list_approvals("pending")), 1)
+                self.assertEqual(ctx.storage.list_approvals("pending")[0]["kind"], "owner_attention")
+
+    def test_same_customer_multiple_messages_link_to_existing_lead(self) -> None:
+        ctx = make_ctx()
+        am = ApprovalManager(ctx)
+        first = intake_message(ctx, am, channel="sms", message_id="sms-1",
+                               phone="0411 222 333", text="Need gutter cleaning in Penrith")
+        second = intake_message(ctx, am, channel="sms", message_id="sms-2",
+                                phone="+61 411 222 333", text="Can I send photos?")
+        self.assertEqual(first["lead_id"], second["lead_id"])
+        self.assertFalse(second["new_lead"])
+        self.assertEqual(len(ctx.storage.lead_enquiries(first["lead_id"])), 2)
+
     def test_sensitive_channel_message_never_autoreplies(self) -> None:
         ctx = make_ctx(ceo_approval_required=False, auto_send_email=True)
         result = intake_message(ctx, ApprovalManager(ctx), channel="instagram",
