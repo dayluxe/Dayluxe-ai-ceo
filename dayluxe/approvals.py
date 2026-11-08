@@ -53,7 +53,9 @@ class ApprovalManager:
         if kind in ("email_reply", "followup"):
             return s.auto_send_email and not payload.get("sensitive")
         if kind == "quote":
-            return s.auto_send_quotes and not payload.get("missing")
+            # The owner retains final pricing authority even for complete quotes.
+            # AUTO_SEND_QUOTES must never bypass an explicit quote approval.
+            return False
         # seo_page_publish (significant website change), outreach_email (bulk/compliance),
         # ad_campaign (money) and owner_attention are never automatic.
         return False
