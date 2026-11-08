@@ -256,6 +256,19 @@ class IntakeAndApprovalTests(unittest.TestCase):
         ctx3 = make_ctx(auto_publish_social=True, ceo_approval_required=False)
         self.assertTrue(ApprovalManager(ctx3).auto_allowed("social_post", {}))
 
+    def test_quotes_never_autosend_even_when_all_switches_enabled(self) -> None:
+        ctx = make_ctx(auto_send_quotes=True, ceo_approval_required=False)
+        manager = ApprovalManager(ctx)
+        self.assertFalse(manager.auto_allowed("quote", {"missing": []}))
+        self.assertFalse(manager.auto_allowed("quote", {"missing": [], "sensitive": False}))
+        result = manager.propose(
+            "quote", "Roof restoration quotation",
+            {"to": "customer@example.com", "subject": "Quotation", "body": "Owner-priced scope", "missing": []},
+            "quote-owner-approval-1",
+        )
+        self.assertEqual(result["status"], "approval_required")
+        self.assertEqual(ctx.storage.list_approvals("pending")[0]["kind"], "quote")
+
     def test_ad_campaign_never_claims_live(self) -> None:
         ctx = make_ctx()
         am = ApprovalManager(ctx)
